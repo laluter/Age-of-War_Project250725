@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>역사의 격전지</title>
+  <style>
+    canvas { border: 1px solid black; background-color: #fff; }
+    button { margin-right: 5px; }
+
+    /*  메뉴 오버레이 스타일  */
+    .overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(210, 180, 140, 0.95); /* 기존 배경색 계열에 살짝 투명도 */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    .overlay h1 {
+      font-size: 4em;
+      color: gold;
+      text-shadow: 2px 2px 4px #000;
+      margin-bottom: 20px;
+    }
+    .overlay h2 {
+      font-size: 2.5em;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .overlay button, .overlay .diff {
+      padding: 12px 24px;
+      font-size: 1.2em;
+      margin: 8px;
+      cursor: pointer;
+      border: 2px solid #333;
+      background: #fff;
+      border-radius: 6px;
+    }
+    .overlay a {
+      margin-top: 20px;
+      color: #333;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    #hud {
+      position: absolute;            /* 수정: 화면 최상단 고정 */
+      top: 10px;                     /* 수정: 상단 마진 */
+      left: 50%;                     /* 수정: 가로 가운데 정렬 */
+      transform: translateX(-50%);   /* 수정: 정확히 중앙 */
+      width: 95%;                    /* 수정: 화면 너비에 맞춤 */
+      display: flex;
+      flex-direction: column;        /* 수정: 3행 구조 */
+      gap: 8px;                      /* 수정: 요소 간격 */
+      background: rgba(210,180,140,0.8);
+      padding: 8px 12px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      z-index: 100;
+      font-family: '맑은 고딕', sans-serif;
+    }
+
+    /* 수정: 기지 체력바 컨테이너 */
+    .base-bar-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .bar-bg {
+      flex: 1;
+      height: 12px;
+      background: #ccc;
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+    .bar-fill {
+      height: 100%;
+      background: green;
+      width: 100%;                   /* JS updateHUD()로 갱신 */
+      transition: width 0.2s ease;
+    }
+    .bar-fill.enemy {
+      background: red;
+    }
+
+    /* 수정: 유닛·타워 버튼 스타일 */
+    .controls {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .hud-btn {
+      background: #fff;
+      border: 2px solid #333;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background 0.2s;
+      position: relative;
+    }
+    .hud-btn:hover {
+      background: #f0e0b0;
+    }
+
+    /* ——— 4) 뱃지 스타일 ——— */
+    .hud-btn .badge {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      background: #c00;
+      color: #fff;
+      border-radius: 50%;
+      padding: 4px 8px;      /* ↑ 더 크게 */
+      font-size: 0.9em;      /* ↑ 키워서 잘 보이게 */
+      min-width: 1.4em;      /* 숫자가 2자리여도 잘립니다. */
+      text-align: center;
+      pointer-events: none;
+    }
+
+    /* ——— 1) 오버레이 쿨다운 ——— */
+    .hud-btn .btn-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      transform-origin: top;
+      transform: scaleY(0);
+      transition: transform 0.1s linear;
+      pointer-events: none;
+    }
+    /* 쿨다운 중일 때 오버레이 비율 적용 */
+    .hud-btn.cooling .btn-overlay {
+      transform: scaleY(var(--cd-ratio, 0));
+    }
+    /* 남은 시간 텍스트 표시 */
+    .hud-btn.cooling::after {
+      content: attr(data-remaining) 's';
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: #333;
+      font-size: 0.9em;
+      pointer-events: none;
+    }
+
+    /* 수정: 자원·상태 텍스트 */
+    .stats {
+      display: flex;
+      gap: 12px;
+      font-weight: bold;
+      color: #333;
+    }
+
+    /* 수정: 페이지 여백 제거 */
+    body, #game {
+      margin: 0;
+      padding: 0;
+    }
+
+    
+  </style>
+</head>
+<body style="background-color: #d2b48c; position: relative;">
+
+  <div id="game" style="position: relative; width:1900px; margin:0 auto;">
+
+    <!-- 수정: HUD 영역 (canvas 위로 이동) -->
+    <div id="hud" style="display: none;">
+      <!-- 기지 체력바 -->
+      <div class="base-bar-container">
+        <span>🏰 내 기지</span>
+        <div class="bar-bg"><div id="playerBaseBar" class="bar-fill"></div></div>
+        <span>적 기지 🏯</span>
+        <div class="bar-bg"><div id="enemyBaseBar" class="bar-fill enemy"></div></div>
+
+        <!-- 예약 생산 현황 표시 -->
+        <div id="productionQueueDisplay" class="stats" style="font-size:0.9em; gap:6px;">
+          예약생산 ▶ <span id="queueDisplayText">없음</span>
+        </div>
+      </div>
+
+      <!-- 유닛·타워 컨트롤 -->
+    <div class="controls">
+      <!-- 근접 유닛 -->
+      <button id="btnSpawnMelee" class="hud-btn">
+        근접 유닛
+        <span class="badge">0</span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 원거리 유닛 -->
+      <button id="btnSpawnRanged" class="hud-btn">
+        원거리 유닛
+        <span class="badge">0</span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 엘리트 유닛 -->
+      <button id="btnSpawnElite" class="hud-btn">
+        엘리트 유닛
+        <span class="badge">0</span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 스페셜 유닛 (미래 시대만 활성화) -->
+      <button id="btnSpawnSpecial" class="hud-btn">
+        스페셜 유닛
+        <span class="badge"></span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 타워 설치 -->
+      <button id="btnBuildTower" class="hud-btn">
+        타워 설치
+        <span class="badge"></span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 타워 업그레이드 -->
+      <button id="btnUpgradeTower" class="hud-btn">
+        타워 업그레이드
+        <span class="badge"></span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 타워 해체 (마지막 설치, 70% 환급) -->
+      <button id="btnSellTower" class="hud-btn">
+        타워 해체<br>(마지막 설치, 70% 환급)
+        <span class="badge"></span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 스킬 1 -->
+      <button id="skill1Btn" class="hud-btn">
+        스킬 1
+        <span class="badge"></span>
+        <div class="btn-overlay"></div>
+      </button>
+
+      <!-- 스킬 2 -->
+      <button id="skill2Btn" class="hud-btn">
+        스킬 2
+        <span class="badge"></span>
+        <div class="btn-overlay"></div>
+      </button>
+    </div>
+
+
+      <!-- 골드·경험치 -->
+      <div class="stats">
+        <span id="goldDisplay">골드: 500</span>
+        <span id="expDisplay">경험치: 0</span>
+        <span id="baseDisplay">내 기지 체력: 500 | 적 기지 체력: 500</span>
+      </div>
+    </div>
+    <!-- 수정 끝 -->
+
+    <!-- 기존 캔버스 (위치 변경 없음) -->
+    <canvas id="gameCanvas" width="1900" height="800"></canvas>
+
+  <!-- ① 메인 메뉴 오버레이 -->
+  <div id="menuScreen" class="overlay">
+    <h1>역사의 격전지</h1>
+    <button id="btnPlay">플레이</button>
+    <button id="btnInstructions">게임 설명</button>
+    <button id="btnExtras">설정</button>
+    <button id="btnMoreGames">더 많은 게임 플레이 해보기</button>
+    <div style="position:absolute; bottom:20px; font-size:0.8em; color:#333;">A game by laluter</div>
+  </div>
+
+  <!-- ② 난이도 선택 오버레이 (기본 숨김) -->
+  <div id="difficultyScreen" class="overlay" style="display:none">
+    <h2>난이도</h2>
+    <p>시작 전에 난이도를 선택해주세요</p>
+    <button class="diff" data-level="easy">EASY</button>
+    <button class="diff" data-level="normal">NORMAL</button>
+    <button class="diff" data-level="hard">HARD</button>
+    <a id="btnBack">뒤로가기</a>
+  </div>
+
+
+
+  <audio id="eraSound" src="https://actions.google.com/sounds/v1/cartoon/cartoon_boing.ogg"></audio>
+  <audio id="towerFireSound-medieval" src="https://actions.google.com/sounds/v1/impacts/wood_plank_flicks.ogg"></audio>
+  <audio id="towerFireSound-modern" src="https://actions.google.com/sounds/v1/weapons/medium_machine_gun_single_shot.ogg"></audio>
+  <audio id="towerFireSound-future" src="https://actions.google.com/sounds/v1/sci-fi/sci_fi_laser_1.ogg"></audio>
+  <audio id="unitAttackSound" src="https://actions.google.com/sounds/v1/impacts/punch_medium.ogg"></audio>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const btnSpawnMelee   = document.getElementById('btnSpawnMelee');
+    const btnSpawnRanged  = document.getElementById('btnSpawnRanged');
+    const btnSpawnElite   = document.getElementById('btnSpawnElite');
+    const btnSpawnSpecial = document.getElementById('btnSpawnSpecial');
+    const btnBuildTower   = document.getElementById('btnBuildTower');
+    const btnUpgradeTower = document.getElementById('btnUpgradeTower');
+    const btnSellTower    = document.getElementById('btnSellTower');  
+    const skill1Btn       = document.getElementById('skill1Btn');
+    const skill2Btn       = document.getElementById('skill2Btn');
+    const units = [];
+    const towers = [];
+    const enemyTowers = [];
+    let gold = 500;
+    let exp = 0;
+    let currentEra = 'medieval';
+    let enemySpawnInterval;
+    let attackLines = [];
+
+    btnSpawnMelee  .addEventListener('click', () => spawnUnit('melee'));
+    btnSpawnRanged .addEventListener('click', () => spawnUnit('ranged'));
+    btnSpawnElite  .addEventListener('click', () => spawnUnit('elite'));
+    btnSpawnSpecial.addEventListener('click', () => spawnSpecialUnit());
+    btnBuildTower  .addEventListener('click', () => buildTower());
+    btnUpgradeTower.addEventListener('click', () => upgradeTower());
+    btnSellTower   .addEventListener('click', () => sellTower(towers.length - 1));
+
+    const skillEffects = [];
+    // Time Warp 시 이동·공격 속도 배율
+    const SLOW_FACTOR  = 0.5;
+
+    const fireSounds = {
+      medieval: document.getElementById("towerFireSound-medieval"),
+      modern: document.getElementById("towerFireSound-modern"),
+      future: document.getElementById("towerFireSound-future")
+    };
+    const unitAttackSound = document.getElementById("unitAttackSound");
+    const eraSound = document.getElementById("eraSound");
+
+    // ── 유닛 생산 큐 & 생산 시간 설정 ──
+    const productionQueue = [];           // { type, remaining(ms) } 객체를 순서대로 보관
+    const MAX_QUEUE_SIZE   = 5;
+
+    // 각 시대(Unit 생산 시간: 초)
+    const productionTime = {
+      medieval: {
+        melee: 2,    
+        ranged: 3,   
+        elite: 5     
+       
+      },
+      modern: {
+        melee: 3,    
+        ranged: 4,   
+        elite: 6     
+      },
+      future: {
+        melee: 4,    
+        ranged: 5,  
+        elite: 7,    
+        special: 7.5  
+      }
+    };
+
+    // 프레임 간 시간 계산용
+    let lastFrameTime = performance.now();
+
+    let playerBaseHp = 500;
+    let enemyBaseHp = 500;
+
+    const towerStats = {
+      medieval: { range: 200, damage: 5, cost: 100, color: 'saddlebrown' },
+      modern: { range: 250, damage: 15, cost: 200, color: 'darkgreen' },
+      future: { range: 300, damage: 30, cost: 400, color: 'magenta' }
+    };
+
+    const towerLimit = 3;
+
+    const expTable = {
+      medieval: { melee: 10, ranged: 15, elite: 25 },
+      modern: { melee: 20, ranged: 30, elite: 40 },
+      future: { melee: 30, ranged: 40, elite: 50, special: 70 }
+    };
+
+    const goldRewardTable = {
+      melee: 25,
+      ranged: 35,
+      elite: 50,
+      special: 80
+    };    
+
+    const eraUpgradeExp = { medieval: 500, modern: 1000 };
+    const baseHpTable = { medieval: 500, modern: 700, future: 900 };
+    const eraBackgrounds = {
+      medieval: '#d2b48c', modern: '#c0c0c0', future: '#222831'
+    };
+
+    document.addEventListener('click', () => {
+      unitAttackSound.play().catch(() => {});
+    });
+
+    
+    function drawHealthBar(x, y, hp, maxHp) {
+        const width = 40;
+        const height = 6;
+        ctx.fillStyle = "#ccc";
+        ctx.fillRect(x, y, width, height);
+        ctx.fillStyle = "lime";
+        ctx.fillRect(x, y, (hp / maxHp) * width, height);
+        ctx.strokeStyle = "#000";
+        ctx.strokeRect(x, y, width, height);
+    }
+
+    function drawAttackLine(x1, y1, x2, y2) {
+      attackLines.push({ x1, y1, x2, y2, ttl: 5 });
+    }    
+
+    const unitTypes = {
+      medieval: {
+        melee: { hp: 100, speed: 1, damage: 10, cost: 50, color: 'brown', range: 20 },
+        ranged: { hp: 80, speed: 1, damage: 15, cost: 70, color: 'orange', range: 120 },
+        elite: { hp: 150, speed: 1, damage: 25, cost: 120, color: 'red', range: 20 }
+      },
+      modern: {
+        melee: { hp: 120, speed: 1.2, damage: 15, cost: 60, color: 'gray', range: 20 },
+        ranged: { hp: 100, speed: 1.1, damage: 20, cost: 90, color: 'blue', range: 130 },
+        elite: { hp: 180, speed: 1.2, damage: 30, cost: 150, color: 'darkblue', range: 20 }
+      },
+      future: {
+        melee: { hp: 140, speed: 1.4, damage: 20, cost: 80, color: 'purple', range: 20 },
+        ranged: { hp: 120, speed: 1.3, damage: 25, cost: 110, color: 'cyan', range: 150 },
+        elite: { hp: 200, speed: 1.5, damage: 40, cost: 180, color: 'black', range: 20 },
+        special: { hp: 300, speed: 1.6, damage: 60, cost: 300, color: 'gold', range: 180 }
+      }
+    };
+
+    class Unit {
+      constructor(x, team, type, stats) {
+        this.x = x;
+        this.y = canvas.height - 100;
+        this.team = team;
+        this.type = type;
+        this.hp = stats.hp;
+        this.maxHp = stats.hp;
+        this.speed = stats.speed;
+        this.damage = stats.damage;
+        this.color = stats.color;
+        this.range = stats.range || 20;
+        this.cooldown = 0;   
+        this.baseAttackCooldown = 0;
+      }
+      move() {
+        this.x += this.team === 'player' ? this.speed : -this.speed;
+      }
+      attack(target) {
+        target.hp -= this.damage;
+         unitAttackSound.currentTime = 0;
+         unitAttackSound.play();
+         drawAttackLine(this.x + 10, this.y + 10, target.x + 10, target.y + 10);
+      }
+    
+      canAttack(target) {
+        const dist = Math.abs(this.x - target.x);
+        return this.team !== target.team && dist <= this.range;
+      }     
+    }
+    
+    // 1) 색상 매핑 테이블 추가
+    const towerColors = {
+      medieval: ['saddlebrown', 'peru', 'sienna'],
+      modern:   ['darkgreen', 'limegreen', 'lightgreen'],
+      future:   ['magenta', 'violet', 'plum']
+    };
+
+    class Tower {
+      constructor(x, stats, era, team) {
+        this.x = x;
+        this.range = stats.range;
+        this.damage = stats.damage;
+        this.color = stats.color;
+        this.era = era;
+        this.level = 0;
+        this.cooldown = 0;
+        this.team = team;
+        this.costSpent = stats.cost;
+        this.color     = towerColors[era][0];
+      }
+      attack(units) {
+
+        // skillEffects 는 전역 배열로, Overwatch 버프가 들어 있습니다.
+        const ow = skillEffects.find(e => e.type === 'overwatch');
+        // 오버워치가 있으면 공격력×multiplier, 사거리+extraRange
+        const dmg = ow ? this.damage * ow.multiplier : this.damage;
+        const rng = ow ? this.range + ow.extraRange : this.range;
+
+        if (this.cooldown > 0) {
+          this.cooldown--;
+          return;
+        }
+        for (let unit of units) {
+          // 사거리(rng) 대신 this.range, 공격력(dmg) 대신 this.damage 사용
+          if ((this.team === 'player' && unit.team === 'enemy' && unit.x >= this.x && unit.x <= this.x + rng) ||
+              (this.team === 'enemy'  && unit.team === 'player' && unit.x <= this.x && unit.x >= this.x - rng)
+          ) {
+            unit.hp -= dmg;
+            fireSounds[this.era].currentTime = 0;
+            fireSounds[this.era].play();
+            this.cooldown = 30;
+            // 이펙트 선 그리기에도 이.color 등 그대로 사용
+            const towerY = canvas.height - 150;
+            ctx.beginPath();
+            ctx.moveTo(this.x + 5, towerY);
+            ctx.lineTo(unit.x + 10, unit.y + 10);
+            ctx.strokeStyle = this.color;
+            ctx.stroke();
+            break;
+          }
+        }
+      }
+      upgrade(upgradeCost) {
+        if (this.level >= 2) return false;
+        this.level++;
+        this.damage += 5;
+        this.range += 20;
+        this.costSpent += upgradeCost;
+        this.color      = towerColors[this.era][this.level];
+        return true;
+      }
+    }
+
+    function buildTower() {
+      if (towers.length >= towerLimit) return;
+      const stats = towerStats[currentEra];
+      if (gold >= stats.cost) {
+        const x = 40 + towers.length * 15;
+        towers.push(new Tower(x, stats, currentEra, "player"));
+        gold -= stats.cost;
+        updateHUD();
+      }
+    }
+
+    function upgradeTower() {
+      for (let tower of towers) {
+        if (tower.level < 2) {
+    
+          // 각 타워가 지어진 시대 기준으로 비용을 꺼냅니다
+          const baseCost = towerStats[tower.era].cost;
+          const upgradeCost = Math.floor(
+            baseCost * (tower.level === 0 ? 1.5 : 2.5)
+          );
+          if (gold >= upgradeCost && tower.upgrade(upgradeCost)) {
+            gold -= upgradeCost;
+            updateHUD();
+          }
+          break;
+        }
+      }
+    }
+
+    /**
+    * 개별 타워 해체
+    * @param {number} idx towers 배열에서 제거할 인덱스
+    */
+    function sellTower(idx) {
+      if (typeof idx !== 'number' || idx < 0 || idx >= towers.length) {
+        alert('해체할 타워가 없습니다!');
+        return;
+      }
+      const tower = towers[idx];
+      const refund = Math.floor(tower.costSpent * 0.7);
+      gold += refund;
+      towers.splice(idx, 1);
+      updateHUD();
+    }
+
+    // 2) 캔버스 클릭으로 타워 클릭 감지 → 개별 해체
+    canvas.addEventListener('click', e => {
+      const rect   = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+
+      const towerY = canvas.height - 150;
+      const w = 10, h = 50;
+
+      // 맨 위에 그려진 타워부터 검사
+      for (let i = towers.length - 1; i >= 0; i--) {
+        const t = towers[i];
+        if (
+          clickX >= t.x && clickX <= t.x + w &&
+          clickY >= towerY && clickY <= towerY + h
+        ) {
+          if (confirm(`이 타워를 해체하고 ${Math.floor(t.costSpent*0.7)} 골드를 회수하시겠습니까?`)) {
+            sellTower(i);
+          }
+          break;
+        }
+      }
+    });
+
+
+
+
+    function spawnUnit(type) {
+      const stats = unitTypes[currentEra][type];
+      // 큐 최대 5개 제한
+      if (productionQueue.length >= MAX_QUEUE_SIZE) {
+        return alert('최대 5개까지 생산 예약할 수 있습니다.');
+      }
+      if (gold < stats.cost) {
+        return alert('골드가 부족합니다!');
+      }
+
+      // 골드 즉시 차감 & 큐에 남은 시간(ms) 으로 푸시
+      gold -= stats.cost;
+      productionQueue.push({
+        type,
+        remaining: productionTime[currentEra][type] * 1000
+      });
+      updateHUD();
+      updateQueueBadges();
+    }
+
+    function spawnSpecialUnit() {
+      if (currentEra !== 'future') {
+        return alert('미래 시대에만 스페셜 유닛을 예약할 수 있습니다.');
+      }
+      const stats = unitTypes.future.special;
+      // 큐 최대 5개 제한
+      if (productionQueue.length >= MAX_QUEUE_SIZE) {
+        return alert('최대 5개까지 생산 예약할 수 있습니다.');
+      }
+      if (gold < stats.cost) {
+        return alert('골드가 부족합니다!');
+      }
+      gold -= stats.cost;
+      productionQueue.push({
+        type: 'special',
+        remaining: productionTime.future.special * 1000
+      });
+      updateHUD();
+      updateQueueBadges();
+    }
+
+    function spawnEnemyUnit() {
+      const types = ['melee', 'ranged', 'elite'];
+      const randomType = types[Math.floor(Math.random() * types.length)];
+      const stats = unitTypes[currentEra][randomType];
+      units.push(new Unit(canvas.width - 20, 'enemy', randomType, stats));
+    }
+
+    /** 
+     * 생산 큐에 담긴 각 타입별 예약 개수를 뱃지에 표시 
+     */
+    function updateQueueBadges() {
+      // 1) productionQueue 에서 각각 몇 개씩 있는지 집계
+      const counts = { melee:0, ranged:0, elite:0, special:0 };
+      productionQueue.forEach(item => {
+        if (counts[item.type] !== undefined) counts[item.type]++;
+      });
+
+      // 2) 각 버튼 .badge 에 반영
+      btnSpawnMelee  .querySelector('.badge').innerText = counts.melee  || '';
+      btnSpawnRanged .querySelector('.badge').innerText = counts.ranged || '';
+      btnSpawnElite  .querySelector('.badge').innerText = counts.elite  || '';
+      // special 은 미래 시대에만 표시
+      btnSpawnSpecial.querySelector('.badge').innerText =
+        (currentEra === 'future' ? counts.special : '');
+
+      const queueInfo = productionQueue
+        .map(i => `${i.type}:${Math.ceil(i.remaining/1000)}s`)
+        .join(' | ');
+      document.getElementById('queueDisplayText').innerText = queueInfo || '없음';
+    }
+
+    function unitsOverlap(unitA, unitB) {
+      // 유닛 크기: 20x20, y좌표는 모두 300이므로 x만 비교
+      return Math.abs(unitA.x - unitB.x) < 20;
+    }
+  
+    function setDifficulty(level) {
+      if (enemySpawnInterval) clearInterval(enemySpawnInterval);
+      let interval;
+      if (level === 'easy') interval = 3000;
+      else if (level === 'normal') interval = 2500;
+      else if (level === 'hard') interval = 2000;
+      enemySpawnInterval = setInterval(() => {
+        spawnEnemyUnit();
+        if (enemyTowers.length < towerLimit) {
+          const stats = towerStats[currentEra];
+          const x = canvas.width - 60 - enemyTowers.length * 15;
+          enemyTowers.push(new Tower(x, stats, currentEra, "enemy"));
+        }
+      }, interval);
+    }
+
+
+    // 2-1) 스킬별 실행 함수 미리 정의
+    function activateIronWall() {
+      const duration = 10000; // ms
+      const baseWidth = 30;                   // HUD에서 설정한 내 기지 폭
+      const offset    = 10;                   // 기지 바로 옆으로 살짝
+      const x = baseWidth + offset;           // 아군 기지 오른쪽에 배치
+      const y = canvas.height - 150;          // 기존 y 위치 그대로
+
+      skillEffects.push({
+        type: 'ironWall',
+        x, y,
+        w: 20, h: 100,
+        expireAt: performance.now() + duration,
+        ttl: duration
+      });
+    }
+    function activateMedEvac() {
+      // 아군 유닛 30%, 기지 100 회복
+      units.forEach(u => {
+        if (u.team==='player') {
+          u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.3);
+        }
+      });
+      playerBaseHp = Math.min(baseHpTable[currentEra], playerBaseHp + 100);
+      updateHUD();
+    }
+    function activateRapidReinforce() {
+      ['melee','ranged','elite'].forEach(type => {
+        const stats = unitTypes[currentEra][type];
+        // 1기씩 반복
+        for (let i = 0; i < 1; i++) {
+          units.push(new Unit(0, 'player', type, stats));
+        }
+      });
+    }
+    function activateOverwatch() {
+      const duration = 8000;
+      skillEffects.push({
+        type: 'overwatch',
+        multiplier: 2.0, // 공격력 2배
+        extraRange: 20,
+        expireAt: performance.now() + duration,
+        ttl: duration
+      });
+    }
+
+    function activateTimeWarp() {
+      const duration = 5000;
+      skillEffects.push({
+        type: 'timeWarp',
+        expireAt: performance.now() + duration,
+        ttl: duration
+      });
+    }
+
+    function activateEraBlast() {
+      // 모든 적 유닛에게 maxHp의 80% 피해
+      units.forEach(u => {
+        if (u.team === 'enemy') {
+          const dmg = Math.floor(u.maxHp * 0.8);
+          u.hp -= dmg;
+        }
+      });
+
+      // (선택) 간단한 비주얼 이펙트: 화면 중앙에서 짧게
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      const duration = 500; // 이펙트 지속(ms)
+      skillEffects.push({
+        type: 'eraBlast',
+        x: cx, y: cy,
+        radius: Math.max(canvas.width, canvas.height),
+        expireAt: performance.now() + duration,
+        ttl: duration
+      });
+    }
+
+    // 2-2) 시대별로 2개씩 스킬 매핑
+    const skillsByEra = {
+      medieval: [
+        { label: 'Iron Wall',    cost:150, cd:40, fn: activateIronWall },
+        { label: 'Med Evac',     cost:200, cd:60, fn: activateMedEvac    }
+      ],
+      modern: [
+        { label: 'Rapid Reinforce', cost:250, cd:50, fn: activateRapidReinforce },
+        { label: 'Overwatch',       cost:300, cd:45, fn: activateOverwatch       }
+      ],
+      future: [
+        { label: 'Time Warp',    cost:350, cd:30, fn: activateTimeWarp  },
+        { label: 'Era Blast',    cost:500, cd:120, fn: activateEraBlast  }
+      ]
+    };
+
+    // 2-3) 현재 버튼 세팅 함수
+    function configureSkillButtons() {
+      const eraSkills = skillsByEra[currentEra];
+      [skill1Btn, skill2Btn].forEach((btn, i) => {
+        const sk = eraSkills[i];
+        btn.innerText = `${sk.label} (${sk.cost}G)`;         // 레이블 + 비용
+        btn.disabled  = false;                              // 활성화
+        btn.onclick   = () => tryUseSkill(sk, btn);         // 클릭 시 시도
+      });
+    }
+
+    // 2-4) 스킬 사용 시도 함수
+    function tryUseSkill(skill, btn) {
+      if (gold < skill.cost) return alert('골드가 부족합니다!');
+      if (btn.disabled) return;
+
+      gold -= skill.cost;
+      updateHUD();
+      skill.fn();
+
+      // 1) 버튼 비활성화 & 클래스 추가
+      btn.disabled = true;
+      btn.classList.add('cooling');
+
+      // 2) 남은 시간(ms) 관리
+      let rem = skill.cd;       // 초 단위
+      btn.dataset.remaining = rem.toFixed(0);
+      btn.style.setProperty('--cd-ratio', '1');
+
+      const intervalId = setInterval(() => {
+        rem -= 1;
+        if (rem <= 0) {
+          clearInterval(intervalId);
+          btn.disabled = false;
+          btn.classList.remove('cooling');
+          btn.removeAttribute('data-remaining');
+        } else {
+          // 남은비율 계산
+          const ratio = (rem / skill.cd).toFixed(2);
+          btn.style.setProperty('--cd-ratio', ratio);
+          btn.dataset.remaining = rem.toFixed(0);
+        }
+      }, 1000);
+    }
+
+
+
+    function updateHUD() {
+      document.getElementById("playerBaseBar").style.width = (playerBaseHp / baseHpTable[currentEra] * 100) + "%";
+      document.getElementById("enemyBaseBar").style.width = (enemyBaseHp / baseHpTable[currentEra] * 100) + "%";
+      document.getElementById("goldDisplay").innerText = `골드: ${gold}`;
+      document.getElementById("expDisplay").innerText = `경험치: ${exp}`;
+      document.getElementById("baseDisplay").innerText = `내 기지 체력: ${playerBaseHp} | 적 기지 체력: ${enemyBaseHp}`;
+
+      const queueInfo = productionQueue
+        .map(item => `${item.type}:${Math.ceil(item.remaining/1000)}s`)
+        .join(' | ');
+      document.getElementById('expDisplay').title = queueInfo || '생산 예약 없음';
+
+      configureTooltips();
+      updateQueueBadges();    // ← HUD가 바뀔 때마다 뱃지 동기화
+    }
+
+    function renderUnits() {
+      units.forEach(unit => {
+        ctx.fillStyle = unit.color;
+        ctx.fillRect(unit.x, unit.y, 20, 20);
+        drawHealthBar(unit.x, unit.y - 10, unit.hp, unit.maxHp);
+      });
+    }
+
+    function renderAttackLines() {
+      attackLines = attackLines.filter(line => {
+        ctx.beginPath();
+        ctx.moveTo(line.x1, line.y1);
+        ctx.lineTo(line.x2, line.y2);
+        ctx.strokeStyle = "red";
+        ctx.stroke();
+        line.ttl--;
+        return line.ttl > 0;
+      });
+    }
+
+    function tryEraUpgrade() {
+      if (currentEra === 'medieval' && exp >= eraUpgradeExp.medieval) {
+        currentEra = 'modern';
+      }
+      else if (currentEra === 'modern' && exp >= eraUpgradeExp.modern) {
+        currentEra = 'future';
+      }
+      else return;
+
+      // 기지 체력·배경 리셋
+      playerBaseHp = baseHpTable[currentEra];
+      enemyBaseHp  = baseHpTable[currentEra];
+      document.body.style.backgroundColor = eraBackgrounds[currentEra];
+      eraSound.play();
+      updateHUD();
+
+      configureSkillButtons();
+      configureTooltips();
+    }
+
+    // (1) 다음 업그레이드 비용 계산 헬퍼
+    function getNextUpgradeCost() {
+      for (let tower of towers) {
+        if (tower.level < 2) {
+          // 기존 타워의 era 기준 비용
+          const base = towerStats[tower.era].cost;
+          const mult = tower.level === 0 ? 1.5 : 2.5;
+          return Math.floor(base * mult);
+        }
+      }
+      return 0; // 업그레이드 대상이 없다면 0
+    }
+
+
+    // (2) 툴팁(title) 세팅 함수
+    function configureTooltips() {
+      // 단, 이 요소들은 DOM에서 이미 querySelector/ getElementById 해 두셨다고 가정합니다.
+      btnSpawnMelee   .title = `골드: ${unitTypes[currentEra].melee.cost}`;
+      btnSpawnRanged  .title = `골드: ${unitTypes[currentEra].ranged.cost}`;
+      btnSpawnElite   .title = `골드: ${unitTypes[currentEra].elite.cost}`;
+      btnSpawnSpecial .title = currentEra === 'future'
+        ? `골드: ${unitTypes.future.special.cost}`
+        : '미래 시대에만 가능';
+
+      btnBuildTower   .title = `골드: ${towerStats[currentEra].cost}`;
+      btnUpgradeTower .title = towers.length
+        const nextCost = getNextUpgradeCost();
+      if (nextCost > 0) {
+        btnUpgradeTower.title    = `골드: ${nextCost}`;
+        btnUpgradeTower.disabled = false;
+      } else {
+        btnUpgradeTower.title    = '모든 타워 최대 레벨';
+        btnUpgradeTower.disabled = true;
+      }
+
+      skill1Btn       .title = `골드: ${skillsByEra[currentEra][0].cost}`;
+      skill2Btn       .title = `골드: ${skillsByEra[currentEra][1].cost}`;
+    }
+
+    
+// ── 전역 상수 ──
+const ERAS      = ['medieval','modern','future'];
+const TEAMS     = ['player','enemy'];
+const UNIT_TYPES= ['melee','ranged','elite','special'];
+
+// ── 이미지 로드 헬퍼 ──
+function loadImage(src) {
+  const img = new Image();
+  img.src = src;
+  img.onerror = ()=> console.error(`이미지 로드 실패: ${src}`);
+  return img;
+}
+
+// ── 자산 저장소 ──
+const assets = {};
+
+// ── 전체 에셋 로드 ──
+function loadAllAssets() {
+  ERAS.forEach(era => {
+    assets[era] = { units: {}, towers: {} };
+
+    TEAMS.forEach(team => {
+      assets[era].units[team]  = {};
+
+      UNIT_TYPES.forEach(type => {
+        // 'special' 은 future 시대만
+        if (type === 'special' && era !== 'future') return;
+        if (type !== 'special' && era === 'future' && !unitTypes.future[type]) return;
+
+        const basePath = `img/${era}/${team}/${type}`;
+
+        // medieval: 하나의 시트
+        if (era === 'medieval') {
+          assets[era].units[team][type] = {
+            sheet: loadImage(`${basePath}/${type}_sheet.png`)
+          };
+        }
+        // modern / future: 애니메이션별 분리
+        else {
+          assets[era].units[team][type] = {
+            Attack: loadImage(`${basePath}/Attack.png`),
+            Dead:   loadImage(`${basePath}/Dead.png`),
+            Idle:   loadImage(`${basePath}/Idle.png`),
+            Walk:   loadImage(`${basePath}/Walk.png`)
+          };
+        }
+      });
+    });
+  });
+}
+
+// 게임 시작 전에 한 번만 호출
+loadAllAssets();
+
+
+
+
+
+
+
+
+function gameLoop() {
+  // ── 0) 스킬 효과 만료 & 생산 큐 업데이트 ──
+  const now   = performance.now();
+  const delta = now - lastFrameTime;
+  lastFrameTime = now;
+
+  // 0-1) 스킬 이펙트 만료 처리
+  skillEffects.forEach(e => e.ttl = e.expireAt - now);
+  for (let i = skillEffects.length - 1; i >= 0; i--) {
+    if (skillEffects[i].ttl <= 0) skillEffects.splice(i, 1);
+  }
+
+  // 0-2) 생산 큐 남은 시간 차감
+  productionQueue.forEach(item => {
+    item.remaining -= delta;
+  });
+  // 0-3) 완료된 건 실제 유닛 생성
+  while (productionQueue.length && productionQueue[0].remaining <= 0) {
+    const done  = productionQueue.shift();
+    const stats = unitTypes[currentEra][done.type];
+    units.push(new Unit(0, 'player', done.type, stats));
+  }
+
+  // ── 1) 캔버스 초기화 ──
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // ── 2) 기지 그리기 ──
+  const baseWidth  = 30;
+  const baseHeight = 80;
+  const baseY      = canvas.height - baseHeight;
+  ctx.fillStyle = 'green';
+  ctx.fillRect(0, baseY, baseWidth, baseHeight);
+  ctx.fillStyle = 'red';
+  ctx.fillRect(canvas.width - baseWidth, baseY, baseWidth, baseHeight);
+
+  // ── 3) 타워 공격 및 그리기 ──
+  const towerY = canvas.height - 150;
+  towers.forEach(tower => {
+    tower.attack(units);
+    ctx.fillStyle = tower.color;
+    ctx.fillRect(tower.x, towerY, 10, 50);
+  });
+  enemyTowers.forEach(tower => {
+    tower.attack(units);
+    ctx.fillStyle = tower.color;
+    ctx.fillRect(tower.x, towerY, 10, 50);
+  });
+
+  // ── 4) 유닛 그리기 & 공격 라인 ──
+  renderUnits();
+  renderAttackLines();
+
+  // ── 5) 유닛 이동 전 “Time Warp” 느려짐 효과 계산 ──
+  const slowActive = skillEffects.some(e => e.type === 'timeWarp');      // ── 추가
+  const moveFactor = slowActive ? SLOW_FACTOR : 1;                        // ── 추가
+
+  // ── 6) 유닛 이동 · 기지 공격 · 충돌 ──
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    let blocked = false;
+
+    // (1) Iron Wall 효과가 있으면, 적 유닛은 장벽 앞에서 멈추기 ── 추가
+    const wall = skillEffects.find(e => e.type === 'ironWall');
+    if (wall && unit.team === 'enemy') {
+      if (unit.x <= wall.x + wall.w && unit.x + 20 > wall.x) {
+        blocked = true;
+      }
+    }
+
+    // (2) 기지 공격 로직 (이동 금지)
+    if (!blocked && unit.team === 'player' && unit.x >= canvas.width - 40) {
+      blocked = true;
+      unit.x = canvas.width - 40;
+      if (unit.baseAttackCooldown <= 0) {
+        enemyBaseHp -= unit.damage;
+        unit.baseAttackCooldown = 60;
+      } else {
+        unit.baseAttackCooldown--;
+      }
+    }
+    if (!blocked && unit.team === 'enemy' && unit.x <= 20) {
+      blocked = true;
+      unit.x = 20;
+      if (unit.baseAttackCooldown <= 0) {
+        playerBaseHp -= unit.damage;
+        unit.baseAttackCooldown = 60;
+      } else {
+        unit.baseAttackCooldown--;
+      }
+    }
+
+    // (3) 일반 공격 및 충돌 판정
+    let canMove = true;
+    for (let j = 0; j < units.length; j++) {
+      const other = units[j];
+      if (unit === other) continue;
+      if (unit.canAttack(other) && unit.cooldown <= 0) {
+        unit.attack(other);
+        unit.cooldown = 30;
+        blocked = true;
+        canMove = false;
+        break;
+      }
+      if (unit.team !== other.team) {
+        const nextX = unit.x + (unit.team === 'player' ? unit.speed : -unit.speed) * moveFactor; // ── 수정
+        if (Math.abs(nextX - other.x) < 20) {
+          canMove = false;
+        }
+      }
+    }
+    if (unit.cooldown > 0) unit.cooldown--;
+
+    // (4) 실제 이동
+    if (!blocked && canMove) {
+      unit.x += (unit.team === 'player' ? unit.speed : -unit.speed) * moveFactor; // ── 수정
+    }
+  }
+
+  // ── 7) 전투 종료 유닛 제거 + 경험치/골드 획득 + 시대 업그레이드 ──
+  for (let i = units.length - 1; i >= 0; i--) {
+    if (units[i].hp <= 0) {
+      if (units[i].team === 'enemy') {
+        const type = units[i].type;
+        gold += goldRewardTable[type] || 20;
+        exp += expTable[currentEra][type] || 0;
+        tryEraUpgrade();
+      }
+      units.splice(i, 1);
+    }
+  }
+
+  // ── 8) HUD 갱신 ──
+  updateHUD();
+
+  // ── 9) 승리/패배 체크 ──
+  if (enemyBaseHp <= 0) {
+    alert("🎉 승리! 적 기지를 파괴했습니다!");
+    location.reload();
+    return;
+  }
+  if (playerBaseHp <= 0) {
+    alert("💀 패배! 우리 기지가 파괴되었습니다...");
+    location.reload();
+    return;
+  }
+
+  // ── 10) 다음 프레임 ──
+  updateQueueBadges();
+  requestAnimationFrame(gameLoop);
+}
+
+
+// 자동 시작 로직
+//setDifficulty('easy');
+//setInterval(() => { gold += 10; updateHUD(); }, 1000);
+//gameLoop();
+  function startGame(level) {
+    document.getElementById('menuScreen').style.display       = 'none';
+    document.getElementById('difficultyScreen').style.display = 'none';
+
+    const hud = document.getElementById('hud');
+    hud.style.display = 'flex';  // flex로 되어 있으면 flex, block 이면 block
+
+    setDifficulty(level);
+    setInterval(() => { gold += 10; updateHUD(); }, 1000);
+    configureSkillButtons(); 
+    configureTooltips();
+    gameLoop();
+  }
+
+  document.getElementById('btnPlay').addEventListener('click', () => {
+    document.getElementById('menuScreen').style.display       = 'none';
+    document.getElementById('difficultyScreen').style.display = 'flex';
+  });
+
+  document.querySelectorAll('#difficultyScreen .diff').forEach(btn =>
+    btn.addEventListener('click', e =>
+      startGame(e.currentTarget.dataset.level)
+    )
+  );
+
+  document.getElementById('btnBack').addEventListener('click', e => {
+    e.preventDefault();
+    document.getElementById('difficultyScreen').style.display = 'none';
+    document.getElementById('menuScreen').style.display       = 'flex';
+  });
+
+  </script>
+</body>
+</html>
