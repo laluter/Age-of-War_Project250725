@@ -30,38 +30,9 @@ UI/HUD: 기지 체력 진행바, 골드·경험치·생산큐 표시, 버튼 쿨
 
 오디오: 시대/타워/유닛 공격 효과음
 
-### 🧩 파일 구조 (권장)
+### 🧩 파일 구조
 
-project-root/
-
-├─ index.html                # (올려준 코드)
-
-├─ img/                      # ⟵ 게임 에셋 폴더 (추가 작업)
-
-│  ├─ medieval/
-
-│  │  ├─ player/
-
-│  │  │  └─ melee/ ranged/ elite/
-
-│  │  └─ enemy/
-
-│  │     └─ melee/ ranged/ elite/
-
-│  ├─ modern/
-
-│  │  ├─ player/...          # Attack.png, Dead.png, Idle.png, Walk.png
-
-│  │  └─ enemy/...
-
-│  └─ future/
-
-│     ├─ player/...          # + special/
-
-│     └─ enemy/...
-
-└─ README.md
-
+<img width="594" height="373" alt="image" src="https://github.com/user-attachments/assets/f050f129-8055-4cd6-815e-2ba8ddc5f8ac" />
 
 에셋 로더 규칙 (코드에 맞춤)
 
